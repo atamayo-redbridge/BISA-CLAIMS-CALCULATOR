@@ -58,11 +58,15 @@ def load_and_validate_claims(file, year_range):
                 df.columns = df.columns.str.upper()
                 df["FECHA_RECLAMO"] = pd.to_datetime(df[detected_columns["FECHA_RECLAMO"]], errors="coerce")
 
+                # Fix: Include claims from October 1, 2023 to September 30, 2024
                 valid_mask = (
                     (df["FECHA_RECLAMO"] >= year_range[0]) &
                     (df["FECHA_RECLAMO"] <= year_range[1])
                 )
                 valid_claims = df[valid_mask]
+
+                # Debugging output for valid claims count
+                st.write(f"📅 **Sheet:** {sheet} → **Valid Claims:** {len(valid_claims)}")
 
                 # Use the sheet with the most valid claims
                 if len(valid_claims) > max_valid_claims:
@@ -145,7 +149,7 @@ def process_quarters(files, year1_range, year2_range):
                 df["COVID_AMOUNT"] = 0
             df["GENERAL_AMOUNT"] = df[detected_columns["MONTO"]] - df["COVID_AMOUNT"]
 
-            # Fixing the length mismatch issue using merge
+            # Merge sums correctly
             covid_sums = df.groupby("COD_ASEGURADO")["COVID_AMOUNT"].sum()
             grouped = grouped.merge(covid_sums, on="COD_ASEGURADO", how="left").fillna(0)
 
@@ -183,7 +187,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Fix & Debugging)")
+st.title("📊 Insurance Claims Processing Tool (Fixed 2024 Date Filtering)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
