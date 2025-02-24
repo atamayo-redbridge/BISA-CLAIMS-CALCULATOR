@@ -48,8 +48,7 @@ def load_and_validate_claims(file, year_range):
         xls = pd.ExcelFile(file)
         validated_claims = pd.DataFrame()
 
-        # Track the sheet with the highest number of valid claims
-        max_valid_claims = 0
+        max_valid_claims = 0  # Track the sheet with the highest valid claims
 
         for sheet in xls.sheet_names:
             df = pd.read_excel(file, sheet_name=sheet)
@@ -146,8 +145,13 @@ def process_quarters(files, year1_range, year2_range):
                 df["COVID_AMOUNT"] = 0
             df["GENERAL_AMOUNT"] = df[detected_columns["MONTO"]] - df["COVID_AMOUNT"]
 
-            grouped["COVID_AMOUNT"] = df.groupby("COD_ASEGURADO")["COVID_AMOUNT"].sum().values
-            grouped["GENERAL_AMOUNT"] = df.groupby("COD_ASEGURADO")["GENERAL_AMOUNT"].sum().values
+            # Fixing the length mismatch issue using merge
+            covid_sums = df.groupby("COD_ASEGURADO")["COVID_AMOUNT"].sum()
+            grouped = grouped.merge(covid_sums, on="COD_ASEGURADO", how="left").fillna(0)
+
+            general_sums = df.groupby("COD_ASEGURADO")["GENERAL_AMOUNT"].sum()
+            grouped = grouped.merge(general_sums, on="COD_ASEGURADO", how="left").fillna(0)
+
             grouped["TOTAL_AMOUNT"] = grouped["COVID_AMOUNT"] + grouped["GENERAL_AMOUNT"]
             grouped["FINAL"] = grouped["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, 20000))
         else:
@@ -179,7 +183,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Auto Sheet Detection)")
+st.title("📊 Insurance Claims Processing Tool (Fix & Debugging)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
