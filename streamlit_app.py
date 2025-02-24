@@ -42,11 +42,14 @@ def extract_month_year(filename):
     year = int(year_match.group()) if year_match else None
     return month, year
 
-# Load and validate claims
+# Load and validate claims (automatically detect correct sheet)
 def load_and_validate_claims(file, year_range):
     try:
         xls = pd.ExcelFile(file)
         validated_claims = pd.DataFrame()
+
+        # Track the sheet with the highest number of valid claims
+        max_valid_claims = 0
 
         for sheet in xls.sheet_names:
             df = pd.read_excel(file, sheet_name=sheet)
@@ -60,8 +63,12 @@ def load_and_validate_claims(file, year_range):
                     (df["FECHA_RECLAMO"] >= year_range[0]) &
                     (df["FECHA_RECLAMO"] <= year_range[1])
                 )
-                validated_claims = pd.concat([validated_claims, df[valid_mask]], ignore_index=True)
-                break  # Stop after processing the first valid sheet
+                valid_claims = df[valid_mask]
+
+                # Use the sheet with the most valid claims
+                if len(valid_claims) > max_valid_claims:
+                    validated_claims = valid_claims
+                    max_valid_claims = len(valid_claims)
 
         return validated_claims
     except Exception as e:
@@ -172,7 +179,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Debugging Enhanced)")
+st.title("📊 Insurance Claims Processing Tool (Auto Sheet Detection)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
