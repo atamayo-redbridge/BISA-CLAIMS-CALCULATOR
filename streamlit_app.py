@@ -83,13 +83,13 @@ def process_quarters(files, year1_range, year2_range):
             claims = load_and_validate_claims(file, year1_range if year == year1_range[0].year else year2_range)
             claims["MONTH"] = month
             claims["YEAR"] = year
-            detected_months.append((file.name, month, year))
+            detected_months.append((file.name, month, year, len(claims)))
             all_claims = pd.concat([all_claims, claims], ignore_index=True)
 
-    # Display detected months and years for verification
-    st.subheader("📅 Detected Months and Years:")
-    for name, month, year in detected_months:
-        st.write(f"**File:** {name} → **Month:** {month.capitalize()}, **Year:** {year}")
+    # Display detected months, years, and claim counts for verification
+    st.subheader("📅 Detected Months, Years, and Valid Claims:")
+    for name, month, year, count in detected_months:
+        st.write(f"**File:** {name} → **Month:** {month.capitalize()}, **Year:** {year}, **Valid Claims:** {count}")
 
     # Group files into quarters
     grouped_files = {}
@@ -102,6 +102,11 @@ def process_quarters(files, year1_range, year2_range):
         if quarter_key not in grouped_files:
             grouped_files[quarter_key] = []
         grouped_files[quarter_key].append(row)
+
+    # Display detected quarters and their claim counts
+    st.subheader("📆 Detected Quarters and Claims:")
+    for quarter, claims in grouped_files.items():
+        st.write(f"**{quarter}:** {len(claims)} claims")
 
     # Cumulative processing logic
     cumulative_data = pd.DataFrame()
@@ -167,7 +172,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Enhanced Filename Detection)")
+st.title("📊 Insurance Claims Processing Tool (Debugging Enhanced)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
