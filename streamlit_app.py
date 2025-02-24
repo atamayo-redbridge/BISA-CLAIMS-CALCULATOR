@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import os
 
-# --------------------- Helper Functions ---------------------
+# ------------------- Helper Functions -------------------
+
 # Dictionary to map month names for detection
 month_mapping = {
     "enero": 1, "febrero": 2, "marzo": 3, "abril": 4,
@@ -12,11 +12,11 @@ month_mapping = {
     "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12
 }
 
-# Detect columns dynamically
+# Detect column variations dynamically
 def detect_columns(df):
     variations = {
         "COD_ASEGURADO": ["COD_ASEGURADO"],
-        "NOMBRE_ASEGURADO": ["NOMBRES ASEGURADO", "NOMBRE ASEGURADO", "NOMBRESASEGURADO"],
+        "NOMBRE_ASEGURADO": ["NOMBRES ASEGURADO", "NOMBRE ASEGURADO", "NOMBRESASEURADO"],
         "FECHA_RECLAMO": ["FECHA_RECLAMO"],
         "MONTO": ["MONTO"],
         "DIAGNOSTICO": ["DIAGNOSTICOS", "DIAGNOSTICO"]
@@ -29,11 +29,11 @@ def detect_columns(df):
                 break
     return detected
 
-# Cap values
+# Cap values according to the limit
 def cap_value(value, cap_limit):
     return max(min(value, cap_limit), -cap_limit)
 
-# Load and validate claims
+# Load and validate claims (detect sheet automatically)
 def load_and_validate_claims(file, year_range):
     try:
         xls = pd.ExcelFile(file)
@@ -52,17 +52,18 @@ def load_and_validate_claims(file, year_range):
                     (df["FECHA_RECLAMO"] <= year_range[1])
                 )
                 validated_claims = pd.concat([validated_claims, df[valid_mask]], ignore_index=True)
-                break
+                break  # Stop after processing the first valid sheet
+
         return validated_claims
     except Exception as e:
         st.error(f"Error reading file: {e}")
         return pd.DataFrame()
 
-# Process data into quarters
+# Process data into quarters with cumulative calculations
 def process_quarters(files, year1_range, year2_range):
     all_claims = pd.DataFrame()
     quarter_data = {}
-    
+
     for file in files:
         filename = file.name.lower()
         month = next((m for m in month_mapping if m in filename), None)
@@ -74,7 +75,7 @@ def process_quarters(files, year1_range, year2_range):
             claims["YEAR"] = year
             all_claims = pd.concat([all_claims, claims], ignore_index=True)
 
-    # Group files into quarters
+    # Group files into quarters based on month
     grouped_files = {}
     for _, row in all_claims.iterrows():
         month = month_mapping[row["MONTH"]]
@@ -86,15 +87,15 @@ def process_quarters(files, year1_range, year2_range):
             grouped_files[quarter_key] = []
         grouped_files[quarter_key].append(row)
 
-    # Processing cumulative data
+    # Cumulative processing logic
     cumulative_data = pd.DataFrame()
     progressive_results = {}
     previous_sum = 0
 
     for quarter, data in grouped_files.items():
         df = pd.DataFrame(data)
-
         detected_columns = detect_columns(df)
+
         grouped = df.groupby([detected_columns["COD_ASEGURADO"], detected_columns["NOMBRE_ASEGURADO"]]).agg({
             detected_columns["MONTO"]: "sum"
         }).reset_index().rename(columns={
@@ -103,10 +104,10 @@ def process_quarters(files, year1_range, year2_range):
             detected_columns["MONTO"]: "TOTAL_AMOUNT"
         })
 
-        # Apply logic based on year
+        # Apply logic based on the year
         year = int(quarter.split("-")[1])
         if year == year1_range[0].year:
-            # COVID separation logic for Year 1
+            # Year 1: Separate COVID and non-COVID claims
             if "DIAGNOSTICO" in detected_columns:
                 df["COVID_AMOUNT"] = np.where(
                     df[detected_columns["DIAGNOSTICO"]].astype(str).str.contains("COVID", case=False, na=False),
@@ -122,13 +123,13 @@ def process_quarters(files, year1_range, year2_range):
             grouped["TOTAL_AMOUNT"] = grouped["COVID_AMOUNT"] + grouped["GENERAL_AMOUNT"]
             grouped["FINAL"] = grouped["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, 20000))
         else:
-            # No COVID distinction for Year 2
+            # Year 2: No COVID separation
             grouped["COVID_AMOUNT"] = 0
             grouped["GENERAL_AMOUNT"] = grouped["TOTAL_AMOUNT"]
             grouped["TOTAL_AMOUNT"] = grouped["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, 40000))
             grouped["FINAL"] = grouped["TOTAL_AMOUNT"]
 
-        # Cumulative sums
+        # Cumulative sum across quarters
         if cumulative_data.empty:
             cumulative_data = grouped
         else:
@@ -148,16 +149,17 @@ def process_quarters(files, year1_range, year2_range):
 
     return quarter_data, progressive_results
 
-# --------------------- Streamlit UI ---------------------
+# ------------------- Streamlit UI -------------------
+
 st.title("📊 Insurance Claims Processing Tool")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
-existing_report = st.file_uploader("Upload the existing report (if available):", type=["xlsx"])
+existing_report = st.file_uploader("Upload an existing report (if available):", type=["xlsx"])
 
 # Upload new monthly files
 st.header("2️⃣ Upload New Monthly Files")
-uploaded_files = st.file_uploader("Upload the new monthly files:", type=["xlsx"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload new monthly files:", type=["xlsx"], accept_multiple_files=True)
 
 # Process and Generate Report
 if st.button("🔄 Process Files"):
