@@ -34,10 +34,11 @@ def detect_columns(df):
 def cap_value(value, cap_limit):
     return max(min(value, cap_limit), -cap_limit)
 
-# Extract month and year from filename
+# Extract month and year from filename using regex to avoid false matches
 def extract_month_year(filename):
     filename = filename.lower()
-    month = next((m for m in month_mapping if m in filename), None)
+    month_match = re.search(r'\b(' + '|'.join(month_mapping.keys()) + r')\b', filename)
+    month = month_match.group() if month_match else None
     year_match = re.search(r'\b(20\d{2})\b', filename)
     year = int(year_match.group()) if year_match else None
     return month, year
@@ -58,7 +59,7 @@ def load_and_validate_claims(file, year_range):
                 df.columns = df.columns.str.upper()
                 df["FECHA_RECLAMO"] = pd.to_datetime(df[detected_columns["FECHA_RECLAMO"]], errors="coerce")
 
-                # Fix: Include claims from October 1, 2023 to September 30, 2024
+                # Include claims from October 1, 2023 to September 30, 2024 (Year 1)
                 valid_mask = (
                     (df["FECHA_RECLAMO"] >= year_range[0]) &
                     (df["FECHA_RECLAMO"] <= year_range[1])
@@ -187,7 +188,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Fixed 2024 Date Filtering)")
+st.title("📊 Insurance Claims Processing Tool (Fixed Month Detection & Date Filtering)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
