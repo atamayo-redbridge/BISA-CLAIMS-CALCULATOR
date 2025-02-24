@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from datetime import datetime
 
 # ------------------- Helper Functions -------------------
@@ -12,7 +13,7 @@ month_mapping = {
     "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12
 }
 
-# Detect column variations dynamically
+# Detect columns dynamically
 def detect_columns(df):
     variations = {
         "COD_ASEGURADO": ["COD_ASEGURADO"],
@@ -33,7 +34,15 @@ def detect_columns(df):
 def cap_value(value, cap_limit):
     return max(min(value, cap_limit), -cap_limit)
 
-# Load and validate claims (detect sheet automatically)
+# Extract month and year from filename
+def extract_month_year(filename):
+    filename = filename.lower()
+    month = next((m for m in month_mapping if m in filename), None)
+    year_match = re.search(r'\b(20\d{2})\b', filename)
+    year = int(year_match.group()) if year_match else None
+    return month, year
+
+# Load and validate claims
 def load_and_validate_claims(file, year_range):
     try:
         xls = pd.ExcelFile(file)
@@ -64,18 +73,25 @@ def process_quarters(files, year1_range, year2_range):
     all_claims = pd.DataFrame()
     quarter_data = {}
 
+    detected_months = []
+
     for file in files:
         filename = file.name.lower()
-        month = next((m for m in month_mapping if m in filename), None)
-        year = int(filename[-9:-5]) if filename[-9:-5].isdigit() else None
+        month, year = extract_month_year(filename)
 
         if month and year:
             claims = load_and_validate_claims(file, year1_range if year == year1_range[0].year else year2_range)
             claims["MONTH"] = month
             claims["YEAR"] = year
+            detected_months.append((file.name, month, year))
             all_claims = pd.concat([all_claims, claims], ignore_index=True)
 
-    # Group files into quarters based on month
+    # Display detected months and years for verification
+    st.subheader("📅 Detected Months and Years:")
+    for name, month, year in detected_months:
+        st.write(f"**File:** {name} → **Month:** {month.capitalize()}, **Year:** {year}")
+
+    # Group files into quarters
     grouped_files = {}
     for _, row in all_claims.iterrows():
         month = month_mapping[row["MONTH"]]
@@ -104,7 +120,7 @@ def process_quarters(files, year1_range, year2_range):
             detected_columns["MONTO"]: "TOTAL_AMOUNT"
         })
 
-        # Apply logic based on the year
+        # Apply logic based on year
         year = int(quarter.split("-")[1])
         if year == year1_range[0].year:
             # Year 1: Separate COVID and non-COVID claims
@@ -151,7 +167,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool")
+st.title("📊 Insurance Claims Processing Tool (Enhanced Filename Detection)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
