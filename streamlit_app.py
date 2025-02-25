@@ -146,17 +146,21 @@ if st.button("🔄 Process Files"):
 
         quarter_data = process_claims(uploaded_files, year1_range, year2_range)
 
-        # Save final report
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
+       # Save final report only if there is valid data
+if quarter_data:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
 
-        with pd.ExcelWriter(output_file) as writer:
-            for quarter, df in quarter_data.items():
-                output_df = df[["COD_ASEGURADO", "NOMBRE_ASEGURADO", "COVID_AMOUNT", "GENERAL_AMOUNT", "TOTAL_AMOUNT", "FINAL"]]
-                output_df.to_excel(writer, sheet_name=quarter, index=False)
+    with pd.ExcelWriter(output_file) as writer:
+        for quarter, df in quarter_data.items():
+            output_df = df[["COD_ASEGURADO", "NOMBRE_ASEGURADO", "COVID_AMOUNT", "GENERAL_AMOUNT", "TOTAL_AMOUNT", "FINAL"]]
+            output_df.to_excel(writer, sheet_name=quarter, index=False)
 
-        st.success("✅ Report processed successfully!")
-        st.download_button(label="📥 Download Processed Report", data=open(output_file, "rb"), file_name=output_file)
+    st.success("✅ Report processed successfully!")
+    st.download_button(label="📥 Download Processed Report", data=open(output_file, "rb"), file_name=output_file)
+
+else:
+    st.error("❌ No valid claims were found in the uploaded files. Please check your input data or date filters.")
 
     else:
         st.error("❌ Please upload at least one monthly file.")
