@@ -34,7 +34,18 @@ def detect_columns(df):
 def cap_value(value, cap_limit):
     return max(min(value, cap_limit), -cap_limit)
 
-# Extract month and year from filename using regex to avoid false matches
+# Assign quarters based on the fiscal year starting in October
+def assign_quarter(month):
+    if month in [10, 11, 12]:  # October to December
+        return "Q1"
+    elif month in [1, 2, 3]:   # January to March
+        return "Q2"
+    elif month in [4, 5, 6]:   # April to June
+        return "Q3"
+    elif month in [7, 8, 9]:   # July to September
+        return "Q4"
+
+# Extract month and year from filename using regex
 def extract_month_year(filename):
     filename = filename.lower()
     month_match = re.search(r'\b(' + '|'.join(month_mapping.keys()) + r')\b', filename)
@@ -43,71 +54,89 @@ def extract_month_year(filename):
     year = int(year_match.group()) if year_match else None
     return month, year
 
-# Detailed validation with debugging information
-def validate_and_debug_claims(df, year_range, detected_columns, sheet_name, file_name):
-    total_claims = len(df)
-    missing_cod_asegurado = df[detected_columns["COD_ASEGURADO"]].isna().sum()
-    missing_monto = df[detected_columns["MONTO"]].isna().sum()
+# Filter claims based on valid date range
+def filter_valid_dates(df, date_col, year_range):
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    valid_mask = (df[date_col] >= year_range[0]) & (df[date_col] <= year_range[1])
+    return df[valid_mask]
 
-    # Convert FECHA_RECLAMO to datetime
-    df["FECHA_RECLAMO"] = pd.to_datetime(df[detected_columns["FECHA_RECLAMO"]], errors="coerce")
-    invalid_dates = df["FECHA_RECLAMO"].isna().sum()
+# Process data into quarters and apply capping logic
+def process_claims(files, year1_range, year2_range):
+    all_claims = pd.DataFrame()
+    quarter_data = {}
+    year2_cumulative_payout = {}
 
-    # Date range filtering
-    valid_mask = (
-        (df["FECHA_RECLAMO"] >= year_range[0]) &
-        (df["FECHA_RECLAMO"] <= year_range[1])
-    )
-    valid_claims = df[valid_mask]
-    excluded_due_to_date = (~valid_mask).sum()
+    for file in files:
+        filename = file.name.lower()
+        month_name, year = extract_month_year(filename)
 
-    # Logging detailed information
-    st.write(f"📄 **File:** {file_name} → **Sheet:** {sheet_name}")
-    st.write(f"🔍 Total Claims: {total_claims}")
-    st.write(f"❌ Missing COD_ASEGURADO: {missing_cod_asegurado}")
-    st.write(f"❌ Missing MONTO: {missing_monto}")
-    st.write(f"❌ Invalid FECHA_RECLAMO: {invalid_dates}")
-    st.write(f"❌ Excluded due to invalid dates: {excluded_due_to_date}")
-    st.write(f"✅ Valid Claims After Filtering: {len(valid_claims)}\n")
+        if not month_name or not year:
+            continue  # Skip files without proper month/year detection
 
-    return valid_claims
+        month_number = month_mapping[month_name]
+        quarter = assign_quarter(month_number)
+        quarter_key = f"{quarter}-{year}"
 
-# Load and validate claims (automatically detect correct sheet)
-def load_and_validate_claims(file, year_range):
-    try:
+        # Load file and process each sheet
         xls = pd.ExcelFile(file)
-        validated_claims = pd.DataFrame()
-
-        max_valid_claims = 0  # Track the sheet with the highest valid claims
-
         for sheet in xls.sheet_names:
             df = pd.read_excel(file, sheet_name=sheet)
             detected_columns = detect_columns(df)
 
             if all(col in detected_columns for col in ["COD_ASEGURADO", "NOMBRE_ASEGURADO", "FECHA_RECLAMO", "MONTO"]):
-                valid_claims = validate_and_debug_claims(df, year_range, detected_columns, sheet, file.name)
+                date_range = year1_range if year == year1_range[0].year else year2_range
+                valid_claims = filter_valid_dates(df, detected_columns["FECHA_RECLAMO"], date_range)
 
-                # Use the sheet with the most valid claims
-                if len(valid_claims) > max_valid_claims:
-                    validated_claims = valid_claims
-                    max_valid_claims = len(valid_claims)
+                # Add quarter assignment
+                valid_claims["QUARTER"] = quarter_key
 
-        return validated_claims
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-        return pd.DataFrame()
+                # Year 1: Apply a cap of 20,000
+                if year == year1_range[0].year:
+                    valid_claims["COVID_AMOUNT"] = np.where(
+                        valid_claims.get(detected_columns["DIAGNOSTICO"], "").astype(str).str.contains("COVID", case=False, na=False),
+                        valid_claims[detected_columns["MONTO"]],
+                        0
+                    )
+                    valid_claims["GENERAL_AMOUNT"] = valid_claims[detected_columns["MONTO"]] - valid_claims["COVID_AMOUNT"]
+                    valid_claims["TOTAL_AMOUNT"] = valid_claims["COVID_AMOUNT"] + valid_claims["GENERAL_AMOUNT"]
+                    valid_claims["FINAL"] = valid_claims["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, 20000))
+
+                # Year 2: Apply payout trigger and cap
+                else:
+                    grouped = valid_claims.groupby(detected_columns["COD_ASEGURADO"])[detected_columns["MONTO"]].sum()
+                    payouts = []
+
+                    for cod, total_claim in grouped.items():
+                        cumulative = year2_cumulative_payout.get(cod, 0) + total_claim
+
+                        if abs(cumulative) > 40000:
+                            payout = min(cumulative, 2000000)  # Cap payout at 2,000,000
+                            year2_cumulative_payout[cod] = payout
+                        else:
+                            payout = 0  # No payment yet if below threshold
+                        
+                        payouts.append(payout)
+
+                    valid_claims["COVID_AMOUNT"] = 0
+                    valid_claims["GENERAL_AMOUNT"] = valid_claims[detected_columns["MONTO"]]
+                    valid_claims["TOTAL_AMOUNT"] = valid_claims["GENERAL_AMOUNT"]
+                    valid_claims["FINAL"] = payouts
+
+                # Store claims in corresponding quarter
+                if quarter_key not in quarter_data:
+                    quarter_data[quarter_key] = valid_claims
+                else:
+                    quarter_data[quarter_key] = pd.concat([quarter_data[quarter_key], valid_claims])
+
+    return quarter_data
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Debugging Tool (Detailed Error Logging)")
-
-# Upload existing report
-st.header("1️⃣ Upload Existing Report (Optional)")
-existing_report = st.file_uploader("Upload an existing report (if available):", type=["xlsx"])
+st.title("📊 Insurance Claims Processing Tool (Updated for Year 1 & Year 2 Logic)")
 
 # Upload new monthly files
-st.header("2️⃣ Upload New Monthly Files")
-uploaded_files = st.file_uploader("Upload new monthly files:", type=["xlsx"], accept_multiple_files=True)
+st.header("📁 Upload Monthly Files")
+uploaded_files = st.file_uploader("Upload monthly files:", type=["xlsx"], accept_multiple_files=True)
 
 # Process and Generate Report
 if st.button("🔄 Process Files"):
@@ -115,15 +144,19 @@ if st.button("🔄 Process Files"):
         year1_range = (pd.Timestamp("2023-10-01"), pd.Timestamp("2024-09-30"))
         year2_range = (pd.Timestamp("2024-10-01"), pd.Timestamp("2025-09-30"))
 
-        # Load and validate claims for each file
-        for file in uploaded_files:
-            month, year = extract_month_year(file.name)
-            year_range = year1_range if year == year1_range[0].year else year2_range
-            validated_claims = load_and_validate_claims(file, year_range)
+        quarter_data = process_claims(uploaded_files, year1_range, year2_range)
 
-            if validated_claims.empty:
-                st.error(f"❌ No valid claims found in file: {file.name}")
-            else:
-                st.success(f"✅ Valid claims successfully processed for file: {file.name}")
+        # Save final report
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
+
+        with pd.ExcelWriter(output_file) as writer:
+            for quarter, df in quarter_data.items():
+                output_df = df[["COD_ASEGURADO", "NOMBRE_ASEGURADO", "COVID_AMOUNT", "GENERAL_AMOUNT", "TOTAL_AMOUNT", "FINAL"]]
+                output_df.to_excel(writer, sheet_name=quarter, index=False)
+
+        st.success("✅ Report processed successfully!")
+        st.download_button(label="📥 Download Processed Report", data=open(output_file, "rb"), file_name=output_file)
+
     else:
         st.error("❌ Please upload at least one monthly file.")
