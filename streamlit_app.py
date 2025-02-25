@@ -56,7 +56,7 @@ def detect_monto_column(df):
 # Dynamically detect the NOMBRE_ASEGURADO column
 def detect_nombre_column(df):
     for col in df.columns:
-        if "NOMBREASEGURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRESASEURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
+        if "NOMBREASEGURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
             return col
     return None
 
@@ -122,39 +122,18 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
             cap_value(df["TOTAL_AMOUNT"], total_cap_year2)  # Year 2: No division
         )
 
-        # Group by COD_ASEGURADO and sum
+        # Group and sum by COD_ASEGURADO
         grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
             "TOTAL_AMOUNT": "sum",
             "FINAL": "sum"
         }).reset_index()
 
-        # Adjust progressive final sum
-        quarter_final_sum = grouped["FINAL"].sum()
-        adjusted_sum = quarter_final_sum - cumulative_final_sum
-        cumulative_final_sum += adjusted_sum
-
-        grouped["QUARTER_SUM"] = adjusted_sum
         quarterly_results[quarter_key] = grouped.copy()
 
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
 
     return quarterly_results, skipped_files
-
-# ---------------------- Streamlit UI ----------------------
-
-st.title("📊 Insurance Claims Processor with Correct Yearly Caps & Final Calculation")
-
-# Upload new files & process
-st.header("📂 Upload New Monthly Claim Files")
-uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
-
-if st.button("🚀 Process Files"):
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    sorted_files = sort_uploaded_files(uploaded_files)
-
     final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
     st.success("✅ Processing complete! Download your report below.")
