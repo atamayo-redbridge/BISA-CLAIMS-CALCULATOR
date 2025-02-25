@@ -56,7 +56,7 @@ def detect_monto_column(df):
 # Dynamically detect the NOMBRE_ASEGURADO column
 def detect_nombre_column(df):
     for col in df.columns:
-        if "NOMBREASEURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
+        if "NOMBREASEGURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRESASEURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
             return col
     return None
 
@@ -64,9 +64,12 @@ def detect_nombre_column(df):
 def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
-    year2_cumulative_payouts = {}
     skipped_files = []
     cumulative_final_sum = 0  # Cumulative sum tracker
+
+    # Define date ranges
+    year1_start, year1_end = pd.Timestamp("2023-10-01"), pd.Timestamp("2024-09-30")
+    year2_start, year2_end = pd.Timestamp("2024-10-01"), pd.Timestamp("2025-09-30")
 
     if existing_data:
         cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
@@ -102,73 +105,36 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         else:
             df["NOMBRE_ASEGURADO"] = "No Name Provided"
 
-        # Detect the correct diagnostic column
-        diagnostic_col = None
-        for col in ["DIAGNOSTICO", "DIAGNOSTICOS"]:
-            if col in df.columns:
-                diagnostic_col = col
-                break
+        df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], errors="coerce")
 
-        # Processing for all quarters (Q1 onward)
-        if quarter_number <= 5:
-            if diagnostic_col:
-                df["COVID_AMOUNT"] = np.where(
-                    df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False),
-                    df[monto_col],
-                    0
-                )
-            else:
-                df["COVID_AMOUNT"] = 0
+        # Filter claims within valid date range
+        df = df[(df["FECHA_RECLAMO"] >= year1_start) & (df["FECHA_RECLAMO"] <= year2_end)]
 
-            df["GENERAL_AMOUNT"] = np.where(
-                df["COVID_AMOUNT"] == 0, df[monto_col], 0
-            )
+        # Apply Year 1 or Year 2 logic
+        df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
-            grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
-                "COVID_AMOUNT": "sum",
-                "GENERAL_AMOUNT": "sum"
-            }).reset_index()
+        df["TOTAL_AMOUNT"] = df[monto_col]
+        
+        # Apply caps and correct FINAL calculation
+        df["FINAL"] = np.where(
+            df["YEAR_TYPE"] == "Year1",
+            cap_value(df["TOTAL_AMOUNT"] / 2, total_cap_year1),  # Year 1: Divide by 2
+            cap_value(df["TOTAL_AMOUNT"], total_cap_year2)  # Year 2: No division
+        )
 
-            if cumulative_data.empty:
-                cumulative_data = grouped
-            else:
-                cumulative_data = cumulative_data.merge(
-                    grouped, on=["COD_ASEGURADO", "NOMBRE_ASEGURADO"], how="outer", suffixes=('_prev', '_new')
-                ).fillna(0)
-                cumulative_data["COVID_AMOUNT"] = cumulative_data["COVID_AMOUNT_prev"] + cumulative_data["COVID_AMOUNT_new"]
-                cumulative_data["GENERAL_AMOUNT"] = cumulative_data["GENERAL_AMOUNT_prev"] + cumulative_data["GENERAL_AMOUNT_new"]
-                cumulative_data = cumulative_data[["COD_ASEGURADO", "NOMBRE_ASEGURADO", "COVID_AMOUNT", "GENERAL_AMOUNT"]]
+        # Group by COD_ASEGURADO and sum
+        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
+            "TOTAL_AMOUNT": "sum",
+            "FINAL": "sum"
+        }).reset_index()
 
-            cumulative_data["TOTAL_AMOUNT"] = cumulative_data["COVID_AMOUNT"] + cumulative_data["GENERAL_AMOUNT"]
-            cumulative_data["FINAL"] = cumulative_data["TOTAL_AMOUNT"] / 2
-
-        # For Q5 and onward (Year 2)
-        else:
-            if quarter_number == 5:
-                cumulative_data = pd.DataFrame()
-
-            grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
-                monto_col: "sum"
-            }).reset_index().rename(columns={monto_col: "TOTAL_AMOUNT"})
-
-            if cumulative_data.empty:
-                cumulative_data = grouped
-            else:
-                cumulative_data = cumulative_data.merge(
-                    grouped, on=["COD_ASEGURADO", "NOMBRE_ASEGURADO"], how="outer", suffixes=('_prev', '_new')
-                ).fillna(0)
-                cumulative_data["TOTAL_AMOUNT"] = cumulative_data["TOTAL_AMOUNT_prev"] + cumulative_data["TOTAL_AMOUNT_new"]
-                cumulative_data = cumulative_data[["COD_ASEGURADO", "NOMBRE_ASEGURADO", "TOTAL_AMOUNT"]]
-
-            cumulative_data["FINAL"] = cumulative_data["TOTAL_AMOUNT"] / 2
-
-        # Calculate cumulative FINAL differences
-        quarter_final_sum = cumulative_data["FINAL"].sum()
+        # Adjust progressive final sum
+        quarter_final_sum = grouped["FINAL"].sum()
         adjusted_sum = quarter_final_sum - cumulative_final_sum
         cumulative_final_sum += adjusted_sum
 
-        cumulative_data["QUARTER_SUM"] = adjusted_sum
-        quarterly_results[quarter_key] = cumulative_data.copy()
+        grouped["QUARTER_SUM"] = adjusted_sum
+        quarterly_results[quarter_key] = grouped.copy()
 
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
@@ -177,67 +143,18 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 BISA Claims Processor")
+st.title("📊 Insurance Claims Processor with Correct Yearly Caps & Final Calculation")
 
-# Upload existing report (optional)
-st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
-uploaded_existing_report = st.file_uploader("Upload Existing Cumulative Report (Excel):", type=["xlsx"])
-
-# Upload new monthly files
-st.header("2️⃣ Upload New Monthly Claim Files")
+# Upload new files & process
+st.header("📂 Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("🚀 Process Files"):
-    if uploaded_files:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-        # Load existing report if available
-        existing_data = {}
-        if uploaded_existing_report:
-            existing_data = load_existing_report(uploaded_existing_report)
-            st.success("✅ Existing cumulative report loaded successfully.")
+    sorted_files = sort_uploaded_files(uploaded_files)
 
-        # Sort uploaded files by date
-        sorted_files_with_dates = sort_uploaded_files(uploaded_files)
-        sorted_files = [(extract_month_year(file.name)[1], month_mapping[extract_month_year(file.name)[0]], file) for file in sorted_files_with_dates]
+    final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
-        # Process quarters with sorted data
-        final_results, skipped_files = process_cumulative_quarters(
-            existing_data,
-            sorted_files,
-            covid_cap=2000,
-            total_cap_year1=20000,
-            trigger_cap_year2=40000,
-            total_cap_year2=2000000,
-            status_text=status_text,
-            progress_bar=progress_bar
-        )
-
-        # Saving results
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_file = f"Chronologically_Processed_Claims_Report_{timestamp}.xlsx"
-        with pd.ExcelWriter(output_file) as writer:
-            overall_final_sum = 0
-            for quarter, df in final_results.items():
-                if not df.empty:
-                    quarter_final_sum = df["FINAL"].sum()
-                    overall_final_sum += quarter_final_sum
-                    df.to_excel(writer, sheet_name=quarter, index=False)
-                    st.info(f"🧾 **{quarter} Final Sum**: {quarter_final_sum:,.2f}")
-
-            st.success(f"🔢 **Overall FINAL Sum Across All Quarters**: {overall_final_sum:,.2f}")
-
-        status_text.text("✅ All files and quarters processed successfully!")
-        st.success("🎉 Report processed with cumulative FINAL sums!")
-
-        # Show skipped files
-        if skipped_files:
-            st.warning("⚠️ Some files were skipped due to missing required columns:")
-            for file in skipped_files:
-                st.write(f"- {file}")
-
-        st.download_button("📥 Download Updated Report", data=open(output_file, "rb"), file_name=output_file)
-
-    else:
-        st.error("❌ Please upload valid Excel files to process.")
+    st.success("✅ Processing complete! Download your report below.")
