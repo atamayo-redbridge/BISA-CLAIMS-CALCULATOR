@@ -28,12 +28,16 @@ def extract_month_year(filename):
 
 # Load previous report if uploaded
 def load_existing_report(uploaded_report):
-    existing_data = {}
-    xls = pd.ExcelFile(uploaded_report)
-    for sheet_name in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet_name)
-        existing_data[sheet_name] = df
-    return existing_data
+    try:
+        existing_data = {}
+        xls = pd.ExcelFile(uploaded_report)
+        for sheet_name in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name=sheet_name)
+            existing_data[sheet_name] = df
+        return existing_data
+    except Exception as e:
+        st.error(f"Error loading existing report: {e}")
+        return {}
 
 # Sort files by year and month
 def sort_uploaded_files(uploaded_files):
@@ -65,13 +69,13 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
     skipped_files = []
-    cumulative_final_sum = 0  # Cumulative sum tracker
+    cumulative_final_sum = 0  
 
     # Define date ranges
     year1_start, year1_end = pd.Timestamp("2023-10-01"), pd.Timestamp("2024-09-30")
     year2_start, year2_end = pd.Timestamp("2024-10-01"), pd.Timestamp("2025-09-30")
 
-    if existing_data:
+    if existing_data and len(existing_data) > 0:
         cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
 
     total_files = len(sorted_files)
@@ -81,7 +85,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     for i, (year, month_number, file) in enumerate(sorted_files):
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
-            quarterly_results[quarter_key] = []
+            quarterly_results[quarter_key] = None  # Placeholder
             quarter_number += 1
 
         df = pd.read_excel(file)
@@ -122,7 +126,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
             cap_value(df["TOTAL_AMOUNT"], total_cap_year2)  # Year 2: No division
         )
 
-        # Group and sum by COD_ASEGURADO
+        # Group by COD_ASEGURADO and sum
         grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
             "TOTAL_AMOUNT": "sum",
             "FINAL": "sum"
@@ -133,7 +137,30 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
 
+    progress_bar.progress(1.0)  # Ensure it reaches 100%
     return quarterly_results, skipped_files
-    final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
-    st.success("✅ Processing complete! Download your report below.")
+# ---------------------- Streamlit UI ----------------------
+
+st.title("📊 Insurance Claims Processor with Debugging")
+
+st.header("📂 Upload New Monthly Claim Files")
+uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
+
+if st.button("🚀 Process Files"):
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    if not uploaded_files:
+        st.error("❌ Please upload at least one file!")
+    else:
+        sorted_files = sort_uploaded_files(uploaded_files)
+
+        final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
+
+        st.success("✅ Processing complete! Download your report below.")
+
+        if skipped_files:
+            st.warning("⚠️ Some files were skipped due to missing columns:")
+            for file in skipped_files:
+                st.write(f"- {file}")
