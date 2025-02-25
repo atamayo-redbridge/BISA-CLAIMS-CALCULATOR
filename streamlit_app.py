@@ -142,10 +142,15 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor with Debugging")
+st.title("📊 Insurance Claims Processor")
 
+# 📥 Upload Previous Report
+st.header("📥 Upload Previous Report (Optional)")
+uploaded_existing_report = st.file_uploader("Upload an existing cumulative report:", type=["xlsx"])
+
+# 📂 Upload New Monthly Files
 st.header("📂 Upload New Monthly Claim Files")
-uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload new claim files:", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("🚀 Process Files"):
     progress_bar = st.progress(0)
@@ -156,9 +161,16 @@ if st.button("🚀 Process Files"):
     else:
         sorted_files = sort_uploaded_files(uploaded_files)
 
-        final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
+        # Load existing data if available
+        existing_data = {}
+        if uploaded_existing_report:
+            existing_data = load_existing_report(uploaded_existing_report)
 
-        st.success("✅ Processing complete! Download your report below.")
+        final_results, skipped_files = process_cumulative_quarters(
+            existing_data, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar
+        )
+
+        st.success("✅ Processing complete! Download your updated report below.")
 
         if skipped_files:
             st.warning("⚠️ Some files were skipped due to missing columns:")
