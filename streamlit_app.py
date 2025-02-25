@@ -43,38 +43,23 @@ def sort_uploaded_files(uploaded_files):
         if month_name and year:
             month_number = month_mapping[month_name]
             files_with_dates.append((year, month_number, file))
-    # Sort files by year and month
     sorted_files = sorted(files_with_dates, key=lambda x: (x[0], x[1]))
     return [file[2] for file in sorted_files]
 
-# Dynamically assign quarters based on sorted months
-def assign_quarters(sorted_files):
-    quarters = {}
-    quarter_number = 1
-    months_in_quarter = []
-
-    for year, month_number, file in sorted_files:
-        months_in_quarter.append((year, month_number, file))
-        if len(months_in_quarter) == 3:
-            quarter_key = f"Q{quarter_number}"
-            quarters[quarter_key] = months_in_quarter.copy()
-            months_in_quarter.clear()
-            quarter_number += 1
-
-    # Add any remaining months to the next quarter
-    if months_in_quarter:
-        quarter_key = f"Q{quarter_number}"
-        quarters[quarter_key] = months_in_quarter
-
-    return quarters
+# Dynamically detect the MONTO column
+def detect_monto_column(df):
+    for col in df.columns:
+        if "MONTO" in col.upper():
+            return col
+    return None
 
 # Process claims and apply caps
 def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
     year2_cumulative_payouts = {}
+    skipped_files = []
 
-    # Load previous cumulative data if available
     if existing_data:
         cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
 
@@ -83,7 +68,6 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     month_counter = 0
 
     for i, (year, month_number, file) in enumerate(sorted_files):
-        # Assign quarter based on month sequence
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
             quarterly_results[quarter_key] = []
@@ -91,6 +75,18 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
         df = pd.read_excel(file)
         status_text.text(f"🔄 Processing {file.name} ({i+1}/{total_files})...")
+
+        # Check for required columns
+        required_columns = ["COD_ASEGURADO", "FECHA_RECLAMO"]
+        if not all(col in df.columns for col in required_columns):
+            skipped_files.append(file.name)
+            continue
+
+        # Detect MONTO column
+        monto_col = detect_monto_column(df)
+        if not monto_col:
+            skipped_files.append(file.name)
+            continue
 
         # Detect the correct diagnostic column
         diagnostic_col = None
@@ -104,14 +100,14 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
             if diagnostic_col:
                 df["COVID_AMOUNT"] = np.where(
                     df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False),
-                    df["MONTO"],
+                    df[monto_col],
                     0
                 )
             else:
                 df["COVID_AMOUNT"] = 0
 
             df["GENERAL_AMOUNT"] = np.where(
-                df["COVID_AMOUNT"] == 0, df["MONTO"], 0
+                df["COVID_AMOUNT"] == 0, df[monto_col], 0
             )
 
             grouped = df.groupby("COD_ASEGURADO").agg({
@@ -140,8 +136,8 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
                 cumulative_data = pd.DataFrame()
 
             grouped = df.groupby("COD_ASEGURADO").agg({
-                "MONTO": "sum"
-            }).reset_index().rename(columns={"MONTO": "TOTAL_AMOUNT"})
+                monto_col: "sum"
+            }).reset_index().rename(columns={monto_col: "TOTAL_AMOUNT"})
 
             if cumulative_data.empty:
                 cumulative_data = grouped
@@ -172,11 +168,11 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
 
-    return quarterly_results
+    return quarterly_results, skipped_files
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor with Chronological Order & Dynamic Quarters")
+st.title("📊 Insurance Claims Processor with Dynamic Column Detection & Chronological Order")
 
 # Upload existing report (optional)
 st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
@@ -202,7 +198,7 @@ if st.button("🚀 Process Files"):
         sorted_files = [(extract_month_year(file.name)[1], month_mapping[extract_month_year(file.name)[0]], file) for file in sorted_files_with_dates]
 
         # Process quarters with sorted data
-        final_results = process_cumulative_quarters(
+        final_results, skipped_files = process_cumulative_quarters(
             existing_data,
             sorted_files,
             covid_cap=2000,
@@ -213,7 +209,7 @@ if st.button("🚀 Process Files"):
             progress_bar=progress_bar
         )
 
-        # Save the results
+        # Saving results
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_file = f"Chronologically_Processed_Claims_Report_{timestamp}.xlsx"
         with pd.ExcelWriter(output_file) as writer:
@@ -223,6 +219,13 @@ if st.button("🚀 Process Files"):
 
         status_text.text("✅ All files and quarters processed successfully!")
         st.success("🎉 Report processed in chronological order!")
+
+        # Show skipped files
+        if skipped_files:
+            st.warning("⚠️ Some files were skipped due to missing required columns:")
+            for file in skipped_files:
+                st.write(f"- {file}")
+
         st.download_button("📥 Download Updated Report", data=open(output_file, "rb"), file_name=output_file)
 
     else:
