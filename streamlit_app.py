@@ -49,8 +49,11 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
 
         combined_df = pd.concat(frames, ignore_index=True)
 
+        # Extract the quarter number using regex
+        quarter_number = int(re.search(r'Q(\d+)', quarter).group(1))
+
         # For Q1-Q4 (Year 1)
-        if int(quarter[1:]) <= 4:
+        if quarter_number <= 4:
             combined_df["COVID_AMOUNT"] = np.where(
                 combined_df["DIAGNOSTICO"].astype(str).str.contains("COVID", case=False, na=False),
                 combined_df["MONTO"],
@@ -69,7 +72,9 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
             if cumulative_data.empty:
                 cumulative_data = grouped
             else:
-                cumulative_data = cumulative_data.merge(grouped, on="COD_ASEGURADO", how="outer", suffixes=('_prev', '_new')).fillna(0)
+                cumulative_data = cumulative_data.merge(
+                    grouped, on="COD_ASEGURADO", how="outer", suffixes=('_prev', '_new')
+                ).fillna(0)
                 cumulative_data["COVID_AMOUNT"] = cumulative_data["COVID_AMOUNT_prev"] + cumulative_data["COVID_AMOUNT_new"]
                 cumulative_data["GENERAL_AMOUNT"] = cumulative_data["GENERAL_AMOUNT_prev"] + cumulative_data["GENERAL_AMOUNT_new"]
                 cumulative_data = cumulative_data[["COD_ASEGURADO", "COVID_AMOUNT", "GENERAL_AMOUNT"]]
@@ -79,7 +84,7 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
             cumulative_data["TOTAL_AMOUNT"] = cumulative_data["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year1))
             cumulative_data["FINAL"] = cumulative_data["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year1))
 
-        # For Q5 and beyond (Year 2)
+        # For Q5 and onward (Year 2)
         else:
             if quarter == "Q5":
                 cumulative_data = pd.DataFrame()
@@ -91,7 +96,9 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
             if cumulative_data.empty:
                 cumulative_data = grouped
             else:
-                cumulative_data = cumulative_data.merge(grouped, on="COD_ASEGURADO", how="outer", suffixes=('_prev', '_new')).fillna(0)
+                cumulative_data = cumulative_data.merge(
+                    grouped, on="COD_ASEGURADO", how="outer", suffixes=('_prev', '_new')
+                ).fillna(0)
                 cumulative_data["TOTAL_AMOUNT"] = cumulative_data["TOTAL_AMOUNT_prev"] + cumulative_data["TOTAL_AMOUNT_new"]
                 cumulative_data = cumulative_data[["COD_ASEGURADO", "TOTAL_AMOUNT"]]
 
@@ -105,7 +112,7 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
                     payout = cap_value(cumulative_payout + total_claim, total_cap_year2)
                     year2_cumulative_payouts[cod] = payout
                 else:
-                    payout = 0
+                    payout = 0  # No payout if below threshold
 
                 payout_list.append(payout)
 
