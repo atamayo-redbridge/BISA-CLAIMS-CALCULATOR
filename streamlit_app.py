@@ -43,6 +43,11 @@ def extract_month_year(filename):
     year = int(year_match.group()) if year_match else None
     return month, year
 
+# Fallback: Extract year directly from dates if filename detection fails
+def extract_year_from_dates(df, date_column):
+    years = pd.to_datetime(df[date_column], errors='coerce').dt.year.dropna().unique()
+    return int(years[0]) if len(years) > 0 else None
+
 # Load and validate claims (automatically detect correct sheet)
 def load_and_validate_claims(file, year_range):
     try:
@@ -90,8 +95,15 @@ def process_quarters(files, year1_range, year2_range):
         filename = file.name.lower()
         month, year = extract_month_year(filename)
 
+        claims = load_and_validate_claims(file, year1_range if year == year1_range[0].year else year2_range)
+
+        # Fallback year detection from date values
+        if not year:
+            detected_columns = detect_columns(claims)
+            year = extract_year_from_dates(claims, detected_columns["FECHA_RECLAMO"])
+            st.write(f"🔍 **Fallback Year Detection:** Detected year from date values → {year}")
+
         if month and year:
-            claims = load_and_validate_claims(file, year1_range if year == year1_range[0].year else year2_range)
             claims["MONTH"] = month
             claims["YEAR"] = year
             detected_months.append((file.name, month, year, len(claims)))
@@ -188,7 +200,7 @@ def process_quarters(files, year1_range, year2_range):
 
 # ------------------- Streamlit UI -------------------
 
-st.title("📊 Insurance Claims Processing Tool (Fixed Month Detection & Date Filtering)")
+st.title("📊 Insurance Claims Processing Tool (Year Detection & Filtering Fix)")
 
 # Upload existing report
 st.header("1️⃣ Upload Existing Report (Optional)")
