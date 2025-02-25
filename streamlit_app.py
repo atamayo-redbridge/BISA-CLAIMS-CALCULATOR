@@ -161,6 +161,3 @@ if quarter_data:
 
 else:
     st.error("❌ No valid claims were found in the uploaded files. Please check your input data or date filters.")
-
-    else:
-        st.error("❌ Please upload at least one monthly file.")
