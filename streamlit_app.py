@@ -56,7 +56,7 @@ def detect_monto_column(df):
 # Dynamically detect the NOMBRE_ASEGURADO column
 def detect_nombre_column(df):
     for col in df.columns:
-        if "NOMBREASEGURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
+        if "NOMBREASEURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
             return col
     return None
 
