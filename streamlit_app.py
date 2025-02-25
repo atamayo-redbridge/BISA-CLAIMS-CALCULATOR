@@ -39,7 +39,7 @@ def load_existing_report(uploaded_report):
         st.error(f"Error loading existing report: {e}")
         return {}
 
-# Sort files by year and month
+# ✅ **Fixed: Sort function now returns (year, month_number, file)**
 def sort_uploaded_files(uploaded_files):
     files_with_dates = []
     for file in uploaded_files:
@@ -47,8 +47,9 @@ def sort_uploaded_files(uploaded_files):
         if month_name and year:
             month_number = month_mapping[month_name]
             files_with_dates.append((year, month_number, file))
-    sorted_files = sorted(files_with_dates, key=lambda x: (x[0], x[1]))
-    return [file[2] for file in sorted_files]
+    
+    # ✅ **Sort correctly and return (year, month_number, file) tuples**
+    return sorted(files_with_dates, key=lambda x: (x[0], x[1]))
 
 # Dynamically detect the MONTO column
 def detect_monto_column(df):
@@ -64,7 +65,7 @@ def detect_nombre_column(df):
             return col
     return None
 
-# Process claims and apply caps
+# ✅ **Fix: Ensure sorted_files structure is handled correctly**
 def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
@@ -82,7 +83,12 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     quarter_number = 1
     month_counter = 0
 
-    for i, (year, month_number, file) in enumerate(sorted_files):
+    # ✅ **Ensure sorted_files contains tuples before iterating**
+    if not sorted_files or not isinstance(sorted_files[0], tuple):
+        st.error("❌ ERROR: File sorting failed. Please check uploaded file names.")
+        return {}, []
+
+    for i, (year, month_number, file) in enumerate(sorted_files):  # ✅ Fixed unpacking issue
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
             quarterly_results[quarter_key] = None  # Placeholder
@@ -161,7 +167,6 @@ if st.button("🚀 Process Files"):
     else:
         sorted_files = sort_uploaded_files(uploaded_files)
 
-        # Load existing data if available
         existing_data = {}
         if uploaded_existing_report:
             existing_data = load_existing_report(uploaded_existing_report)
