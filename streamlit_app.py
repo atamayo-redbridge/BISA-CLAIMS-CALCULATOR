@@ -39,7 +39,7 @@ def load_existing_report(uploaded_report):
         st.error(f"Error loading existing report: {e}")
         return {}
 
-# ✅ **Fixed: Sort function now returns (year, month_number, file)**
+# Sort files by year and month
 def sort_uploaded_files(uploaded_files):
     files_with_dates = []
     for file in uploaded_files:
@@ -47,8 +47,6 @@ def sort_uploaded_files(uploaded_files):
         if month_name and year:
             month_number = month_mapping[month_name]
             files_with_dates.append((year, month_number, file))
-    
-    # ✅ **Sort correctly and return (year, month_number, file) tuples**
     return sorted(files_with_dates, key=lambda x: (x[0], x[1]))
 
 # Dynamically detect the MONTO column
@@ -65,7 +63,7 @@ def detect_nombre_column(df):
             return col
     return None
 
-# ✅ **Fix: Ensure sorted_files structure is handled correctly**
+# Process claims and apply caps
 def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
@@ -83,12 +81,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     quarter_number = 1
     month_counter = 0
 
-    # ✅ **Ensure sorted_files contains tuples before iterating**
-    if not sorted_files or not isinstance(sorted_files[0], tuple):
-        st.error("❌ ERROR: File sorting failed. Please check uploaded file names.")
-        return {}, []
-
-    for i, (year, month_number, file) in enumerate(sorted_files):  # ✅ Fixed unpacking issue
+    for i, (year, month_number, file) in enumerate(sorted_files):
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
             quarterly_results[quarter_key] = None  # Placeholder
@@ -125,11 +118,11 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
         df["TOTAL_AMOUNT"] = df[monto_col]
         
-        # Apply caps and correct FINAL calculation
+        # ✅ FIX: Use `.apply()` to prevent ValueError
         df["FINAL"] = np.where(
             df["YEAR_TYPE"] == "Year1",
-            cap_value(df["TOTAL_AMOUNT"] / 2, total_cap_year1),  # Year 1: Divide by 2
-            cap_value(df["TOTAL_AMOUNT"], total_cap_year2)  # Year 2: No division
+            df["TOTAL_AMOUNT"].div(2).apply(lambda x: cap_value(x, total_cap_year1)),  # ✅ FIXED
+            df["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year2))  # ✅ FIXED
         )
 
         # Group by COD_ASEGURADO and sum
@@ -176,8 +169,3 @@ if st.button("🚀 Process Files"):
         )
 
         st.success("✅ Processing complete! Download your updated report below.")
-
-        if skipped_files:
-            st.warning("⚠️ Some files were skipped due to missing columns:")
-            for file in skipped_files:
-                st.write(f"- {file}")
