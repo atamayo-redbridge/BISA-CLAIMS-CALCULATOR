@@ -37,17 +37,35 @@ def assign_quarter_based_on_filename(month_number):
     elif month_number in [7, 8, 9]:
         return "Q4"
 
+# Load previous report if uploaded
+def load_existing_report(uploaded_report):
+    existing_data = {}
+    xls = pd.ExcelFile(uploaded_report)
+    for sheet_name in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet_name)
+        existing_data[sheet_name] = df
+    return existing_data
+
 # Process claims and apply caps
-def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2):
+def process_cumulative_quarters(existing_data, dataframes, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
     year2_cumulative_payouts = {}
 
-    for quarter, frames in dataframes.items():
+    # Load previous cumulative data if available
+    if existing_data:
+        cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
+
+    total_quarters = len(dataframes)
+
+    for i, (quarter, frames) in enumerate(dataframes.items()):
         if not frames:
             continue
 
         combined_df = pd.concat(frames, ignore_index=True)
+
+        # Update status message
+        status_text.text(f"🔄 Processing {quarter} ({i+1}/{total_quarters})...")
 
         # Extract the quarter number using regex
         quarter_number = int(re.search(r'Q(\d+)', quarter).group(1))
@@ -130,21 +148,38 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
 
         quarterly_results[quarter] = cumulative_data.copy()
 
+        # Update progress bar
+        progress_bar.progress((i + 1) / total_quarters)
+
     return quarterly_results
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processing App")
+st.title("📊 Insurance Claims Processing App with Cumulative Report Support")
 
-st.header("1️⃣ Upload Excel Files")
-uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
+# Upload existing report (optional)
+st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
+uploaded_existing_report = st.file_uploader("Upload Existing Cumulative Report (Excel):", type=["xlsx"])
+
+# Upload new monthly files
+st.header("2️⃣ Upload New Monthly Claim Files")
+uploaded_files = st.file_uploader("Upload New Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("🚀 Process Files"):
     if uploaded_files:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         quarterly_data = {}
 
+        # Load existing report if available
+        existing_data = {}
+        if uploaded_existing_report:
+            existing_data = load_existing_report(uploaded_existing_report)
+            st.success("✅ Existing cumulative report loaded successfully.")
+
         # Process uploaded files
-        for file in uploaded_files:
+        total_files = len(uploaded_files)
+        for i, file in enumerate(uploaded_files):
             file_name = file.name
             month_name, year = extract_month_year(file_name)
             if not month_name or not year:
@@ -168,24 +203,33 @@ if st.button("🚀 Process Files"):
                     quarterly_data[quarter_key].append(df)
                     break
 
+            # Update progress
+            status_text.text(f"📂 Processing file {i + 1} of {total_files}: {file_name}")
+            progress_bar.progress((i + 1) / total_files)
+
+        # Process quarters with cumulative data
         final_results = process_cumulative_quarters(
+            existing_data,
             quarterly_data,
             covid_cap=2000,
             total_cap_year1=20000,
             trigger_cap_year2=40000,
-            total_cap_year2=2000000
+            total_cap_year2=2000000,
+            status_text=status_text,
+            progress_bar=progress_bar
         )
 
         # Saving results
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
+        output_file = f"Updated_Processed_Claims_Report_{timestamp}.xlsx"
         with pd.ExcelWriter(output_file) as writer:
             for quarter, df in final_results.items():
                 if not df.empty:
                     df.to_excel(writer, sheet_name=quarter, index=False)
 
-        st.success("✅ Report processed successfully!")
-        st.download_button("📥 Download Report", data=open(output_file, "rb"), file_name=output_file)
+        status_text.text("✅ All files and quarters processed successfully!")
+        st.success("🎉 Report processed successfully with cumulative data!")
+        st.download_button("📥 Download Updated Report", data=open(output_file, "rb"), file_name=output_file)
 
     else:
         st.error("❌ Please upload valid Excel files to process.")
