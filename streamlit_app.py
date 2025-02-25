@@ -52,13 +52,23 @@ def process_cumulative_quarters(dataframes, covid_cap, total_cap_year1, trigger_
         # Extract the quarter number using regex
         quarter_number = int(re.search(r'Q(\d+)', quarter).group(1))
 
+        # Detect the correct diagnostic column
+        diagnostic_col = None
+        for col in ["DIAGNOSTICO", "DIAGNOSTICOS"]:
+            if col in combined_df.columns:
+                diagnostic_col = col
+                break
+
         # For Q1-Q4 (Year 1)
         if quarter_number <= 4:
-            combined_df["COVID_AMOUNT"] = np.where(
-                combined_df["DIAGNOSTICO"].astype(str).str.contains("COVID", case=False, na=False),
-                combined_df["MONTO"],
-                0
-            )
+            if diagnostic_col:
+                combined_df["COVID_AMOUNT"] = np.where(
+                    combined_df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False),
+                    combined_df["MONTO"],
+                    0
+                )
+            else:
+                combined_df["COVID_AMOUNT"] = 0  # No COVID claims detected if column is missing
 
             combined_df["GENERAL_AMOUNT"] = np.where(
                 combined_df["COVID_AMOUNT"] == 0, combined_df["MONTO"], 0
