@@ -74,7 +74,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Detect necessary columns
         monto_col = detect_column(df, ["MONTO"])
-        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO", "NOMBRESASEURADO"])
+        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO"])
         diagnostic_col = detect_column(df, ["DIAGNOSTICO", "DIAGNOSTICOS"])
 
         if not monto_col:
@@ -89,32 +89,16 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         # Convert claim date to datetime
         df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], format="%m/%d/%Y", errors="coerce")
 
-        # Debugging: Check Min/Max Dates
-        st.text("📅 Min FECHA_RECLAMO: " + str(df["FECHA_RECLAMO"].min()))
-        st.text("📅 Max FECHA_RECLAMO: " + str(df["FECHA_RECLAMO"].max()))
-
         # Define Year 1 and Year 2 date ranges
         year1_start = pd.Timestamp("2023-10-01")
         year1_end = pd.Timestamp("2024-09-30")
         year2_start = pd.Timestamp("2024-10-01")
 
-        # Identify COVID-related claims
-        if diagnostic_col:
-            diagnostic_series = df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False)
-        else:
-            diagnostic_series = pd.Series(False, index=df.index)
-
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
-        # Debug: Check if COD_ASEGURADO 2196 and 2807 exist before aggregation
-        filtered_df = df[df["COD_ASEGURADO"].isin([2196, 2807])]
-        if not filtered_df.empty:
-            st.text("✅ 2196 or 2807 found before aggregation!")
-            st.write(filtered_df[["COD_ASEGURADO", "FECHA_RECLAMO"]])
-
         # Apply Year 1 logic
-        df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
+        df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_col, df[monto_col], 0)
         df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
 
         # Apply Year 2 logic
@@ -131,13 +115,16 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
             df["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year2))
         )
 
-        # Aggregate data
+        # Ensure all COD_ASEGURADO values are kept (even if FINAL = 0)
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False)[numeric_cols].sum()
         grouped.fillna(0, inplace=True)
 
         # Preserve all previous data when merging
-        quarterly_results[quarter_key] = pd.concat([quarterly_results[quarter_key], grouped], ignore_index=True)
+        if quarter_key in quarterly_results:
+            quarterly_results[quarter_key] = pd.concat([quarterly_results[quarter_key], grouped], ignore_index=True).fillna(0)
+        else:
+            quarterly_results[quarter_key] = grouped.copy().fillna(0)
 
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
@@ -146,7 +133,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (With Debugging & Download)")
+st.title("📊 Insurance Claims Processor (Fixed Retention)")
 
 st.header("1️⃣ Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
