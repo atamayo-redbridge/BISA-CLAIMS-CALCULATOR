@@ -98,7 +98,17 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
             df.rename(columns={name_col: "NOMBRE_ASEGURADO"}, inplace=True)
 
         # Convert claim date to datetime
-        df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], errors="coerce")
+        df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], format="%m/%d/%Y", errors="coerce")
+
+        # Debugging: Print the min and max dates
+        print("📅 Min FECHA_RECLAMO in this file:", df["FECHA_RECLAMO"].min())
+        print("📅 Max FECHA_RECLAMO in this file:", df["FECHA_RECLAMO"].max())
+
+        # Check if COD_ASEGURADO 2196 or 2807 is still present
+        if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
+            print("✅ COD_ASEGURADO 2196 or 2807 found after fixing date parsing!")
+        else:
+            print("❌ COD_ASEGURADO 2196 and 2807 missing! Check FECHA_RECLAMO filtering.")
 
         # Define Year 1 and Year 2 date ranges
         year1_start = pd.Timestamp("2023-10-01")
