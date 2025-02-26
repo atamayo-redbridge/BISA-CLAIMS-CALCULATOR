@@ -74,7 +74,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Detect necessary columns
         monto_col = detect_column(df, ["MONTO"])
-        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO"])
+        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO", "NOMBRESASEURADO"])
         diagnostic_col = detect_column(df, ["DIAGNOSTICO", "DIAGNOSTICOS"])
 
         if not monto_col:
@@ -107,6 +107,12 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
+        # Debug: Check if COD_ASEGURADO 2196 and 2807 exist before aggregation
+        filtered_df = df[df["COD_ASEGURADO"].isin([2196, 2807])]
+        if not filtered_df.empty:
+            st.text("✅ 2196 or 2807 found before aggregation!")
+            st.write(filtered_df[["COD_ASEGURADO", "FECHA_RECLAMO"]])
+
         # Apply Year 1 logic
         df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
         df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
@@ -125,7 +131,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
             df["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year2))
         )
 
-        # 🛠 **Fix: Exclude non-numeric columns before aggregation**
+        # Aggregate data
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False)[numeric_cols].sum()
         grouped.fillna(0, inplace=True)
@@ -140,7 +146,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (With Fix for Aggregation)")
+st.title("📊 Insurance Claims Processor (With Debugging & Download)")
 
 st.header("1️⃣ Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
@@ -152,6 +158,15 @@ if st.button("🚀 Process Files"):
 
         sorted_files = sort_uploaded_files(uploaded_files)
         final_results, skipped_files = process_cumulative_quarters(sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
+
+        # Save processed data to an Excel file
+        output_buffer = BytesIO()
+        with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
+            for quarter, df in final_results.items():
+                df.to_excel(writer, sheet_name=quarter, index=False)
+
+        output_buffer.seek(0)
+        st.download_button("📥 Download Processed Report", data=output_buffer, file_name="Processed_Claims_Report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.success("✅ Processing complete!")
 
