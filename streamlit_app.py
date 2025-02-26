@@ -28,15 +28,6 @@ def extract_month_year(filename):
     year = int(year_match.group()) if year_match else None
     return month, year
 
-# Load previous report if uploaded
-def load_existing_report(uploaded_report):
-    existing_data = {}
-    xls = pd.ExcelFile(uploaded_report)
-    for sheet_name in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet_name)
-        existing_data[sheet_name] = df
-    return existing_data
-
 # Sort files by year and month
 def sort_uploaded_files(uploaded_files):
     files_with_dates = []
@@ -47,7 +38,7 @@ def sort_uploaded_files(uploaded_files):
             files_with_dates.append((year, month_number, file))
     return sorted(files_with_dates, key=lambda x: (x[0], x[1]))
 
-# Dynamically detect required columns
+# Detect column dynamically
 def detect_column(df, possible_names):
     for col in df.columns:
         if any(name in col.upper() for name in possible_names):
@@ -56,13 +47,10 @@ def detect_column(df, possible_names):
 
 # ---------------------- Processing Claims ----------------------
 
-def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
+def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
     skipped_files = []
-
-    if existing_data:
-        cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
 
     total_files = len(sorted_files)
     quarter_number = 1
@@ -100,10 +88,6 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         # Convert claim date to datetime
         df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], format="%m/%d/%Y", errors="coerce")
 
-        # Debugging: Check Min/Max Dates
-        print("📅 Min FECHA_RECLAMO:", df["FECHA_RECLAMO"].min())
-        print("📅 Max FECHA_RECLAMO:", df["FECHA_RECLAMO"].max())
-
         # Define Year 1 and Year 2 date ranges
         year1_start = pd.Timestamp("2023-10-01")
         year1_end = pd.Timestamp("2024-09-30")
@@ -118,16 +102,11 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
-        # Check before aggregation
-        if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
-            print("✅ COD_ASEGURADO 2196 or 2807 found before aggregation!")
-            print(df[df["COD_ASEGURADO"].isin([2196, 2807])])
-
-        # Apply Year 1 logic for all claims from Oct 1, 2023 – Sept 30, 2024
+        # Apply Year 1 logic
         df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
         df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
 
-        # Apply Year 2 logic for claims from Oct 1, 2024, onwards
+        # Apply Year 2 logic
         df.loc[df["YEAR_TYPE"] == "Year2", "COVID_AMOUNT"] = 0
         df.loc[df["YEAR_TYPE"] == "Year2", "GENERAL_AMOUNT"] = df[monto_col]
 
@@ -157,12 +136,9 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (With Debugging)")
+st.title("📊 Insurance Claims Processor (With Download Option)")
 
-st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
-uploaded_existing_report = st.file_uploader("Upload Existing Report (Excel):", type=["xlsx"])
-
-st.header("2️⃣ Upload New Monthly Claim Files")
+st.header("1️⃣ Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("🚀 Process Files"):
@@ -171,9 +147,33 @@ if st.button("🚀 Process Files"):
         status_text = st.empty()
 
         sorted_files = sort_uploaded_files(uploaded_files)
-        final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
+        final_results, skipped_files = process_cumulative_quarters(sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
-        st.success("✅ Processing complete!")
+        # Save results to an Excel file
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
+        output_buffer = BytesIO()
+
+        with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
+            for quarter, df in final_results.items():
+                if not df.empty:
+                    df.to_excel(writer, sheet_name=quarter, index=False)
+
+        output_buffer.seek(0)
+
+        st.success("✅ Processing complete! Download your report below.")
+        st.download_button(
+            label="📥 Download Processed Report",
+            data=output_buffer,
+            file_name=output_file,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        # Show skipped files
+        if skipped_files:
+            st.warning("⚠️ Some files were skipped due to missing required columns:")
+            for file in skipped_files:
+                st.write(f"- {file}")
 
     else:
         st.error("❌ Please upload valid Excel files to process.")
