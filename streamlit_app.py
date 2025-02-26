@@ -74,7 +74,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Detect necessary columns
         monto_col = detect_column(df, ["MONTO"])
-        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO","NOMBRESASEURADO"])
+        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO"])
         diagnostic_col = detect_column(df, ["DIAGNOSTICO", "DIAGNOSTICOS"])
 
         if not monto_col:
@@ -107,11 +107,6 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
-        # Debug: Check if COD_ASEGURADO 2196 and 2807 exist before aggregation
-        if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
-            st.text("✅ 2196 or 2807 found before aggregation!")
-            st.write(df[df["COD_ASEGURADO"].isin([2196, 2807])])
-
         # Apply Year 1 logic
         df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
         df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
@@ -130,15 +125,10 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
             df["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year2))
         )
 
-        # Aggregate data
-        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False).sum()
-        grouped.fillna(0, inplace=True)  # Ensure missing values are not dropped
-
-        # Debug: Check if 2196 and 2807 exist after aggregation
-        if 2196 in grouped["COD_ASEGURADO"].values or 2807 in grouped["COD_ASEGURADO"].values:
-            st.text("✅ 2196 or 2807 found after aggregation!")
-        else:
-            st.text("❌ 2196 and 2807 are missing after aggregation!")
+        # 🛠 **Fix: Exclude non-numeric columns before aggregation**
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False)[numeric_cols].sum()
+        grouped.fillna(0, inplace=True)
 
         # Preserve all previous data when merging
         quarterly_results[quarter_key] = pd.concat([quarterly_results[quarter_key], grouped], ignore_index=True)
@@ -150,7 +140,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (With Debugging)")
+st.title("📊 Insurance Claims Processor (With Fix for Aggregation)")
 
 st.header("1️⃣ Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
