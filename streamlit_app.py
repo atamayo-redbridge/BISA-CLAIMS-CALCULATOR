@@ -59,7 +59,8 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
     for i, (year, month_number, file) in enumerate(sorted_files):
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
-            quarterly_results[quarter_key] = []
+            if quarter_key not in quarterly_results:
+                quarterly_results[quarter_key] = pd.DataFrame()
             quarter_number += 1
 
         df = pd.read_excel(file)
@@ -73,7 +74,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Detect necessary columns
         monto_col = detect_column(df, ["MONTO"])
-        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO"])
+        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO","NOMBRESASEURADO"])
         diagnostic_col = detect_column(df, ["DIAGNOSTICO", "DIAGNOSTICOS"])
 
         if not monto_col:
@@ -130,12 +131,8 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         )
 
         # Aggregate data
-        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
-            "COVID_AMOUNT": "sum",
-            "GENERAL_AMOUNT": "sum",
-            "TOTAL_AMOUNT": "sum",
-            "FINAL": "sum"
-        }).reset_index()
+        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False).sum()
+        grouped.fillna(0, inplace=True)  # Ensure missing values are not dropped
 
         # Debug: Check if 2196 and 2807 exist after aggregation
         if 2196 in grouped["COD_ASEGURADO"].values or 2807 in grouped["COD_ASEGURADO"].values:
@@ -143,7 +140,9 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         else:
             st.text("❌ 2196 and 2807 are missing after aggregation!")
 
-        quarterly_results[quarter_key] = grouped.copy()
+        # Preserve all previous data when merging
+        quarterly_results[quarter_key] = pd.concat([quarterly_results[quarter_key], grouped], ignore_index=True)
+
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
 
