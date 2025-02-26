@@ -177,6 +177,3 @@ if st.button("🚀 Process Files"):
 
     else:
         st.error("❌ Please upload valid Excel files to process.")
-
-    else:
-        st.error("❌ Please upload valid Excel files to process.")
