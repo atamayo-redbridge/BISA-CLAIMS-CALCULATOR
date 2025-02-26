@@ -89,8 +89,8 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], format="%m/%d/%Y", errors="coerce")
 
         # Debugging: Check Min/Max Dates
-        print("📅 Min FECHA_RECLAMO:", df["FECHA_RECLAMO"].min())
-        print("📅 Max FECHA_RECLAMO:", df["FECHA_RECLAMO"].max())
+        st.text("📅 Min FECHA_RECLAMO: " + str(df["FECHA_RECLAMO"].min()))
+        st.text("📅 Max FECHA_RECLAMO: " + str(df["FECHA_RECLAMO"].max()))
 
         # Define Year 1 and Year 2 date ranges
         year1_start = pd.Timestamp("2023-10-01")
@@ -108,8 +108,8 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Debug: Check if COD_ASEGURADO 2196 and 2807 exist before aggregation
         if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
-            print("✅ 2196 or 2807 found before aggregation!")
-            print(df[df["COD_ASEGURADO"].isin([2196, 2807])])
+            st.text("✅ 2196 or 2807 found before aggregation!")
+            st.write(df[df["COD_ASEGURADO"].isin([2196, 2807])])
 
         # Apply Year 1 logic
         df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
@@ -139,9 +139,9 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
         # Debug: Check if 2196 and 2807 exist after aggregation
         if 2196 in grouped["COD_ASEGURADO"].values or 2807 in grouped["COD_ASEGURADO"].values:
-            print("✅ 2196 or 2807 found after aggregation!")
+            st.text("✅ 2196 or 2807 found after aggregation!")
         else:
-            print("❌ 2196 and 2807 are missing after aggregation!")
+            st.text("❌ 2196 and 2807 are missing after aggregation!")
 
         quarterly_results[quarter_key] = grouped.copy()
         month_counter += 1
