@@ -100,15 +100,9 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         # Convert claim date to datetime
         df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], format="%m/%d/%Y", errors="coerce")
 
-        # Debugging: Print the min and max dates
-        print("📅 Min FECHA_RECLAMO in this file:", df["FECHA_RECLAMO"].min())
-        print("📅 Max FECHA_RECLAMO in this file:", df["FECHA_RECLAMO"].max())
-
-        # Check if COD_ASEGURADO 2196 or 2807 is still present
-        if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
-            print("✅ COD_ASEGURADO 2196 or 2807 found after fixing date parsing!")
-        else:
-            print("❌ COD_ASEGURADO 2196 and 2807 missing! Check FECHA_RECLAMO filtering.")
+        # Debugging: Check Min/Max Dates
+        print("📅 Min FECHA_RECLAMO:", df["FECHA_RECLAMO"].min())
+        print("📅 Max FECHA_RECLAMO:", df["FECHA_RECLAMO"].max())
 
         # Define Year 1 and Year 2 date ranges
         year1_start = pd.Timestamp("2023-10-01")
@@ -123,6 +117,11 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
+
+        # Check before aggregation
+        if 2196 in df["COD_ASEGURADO"].values or 2807 in df["COD_ASEGURADO"].values:
+            print("✅ COD_ASEGURADO 2196 or 2807 found before aggregation!")
+            print(df[df["COD_ASEGURADO"].isin([2196, 2807])])
 
         # Apply Year 1 logic for all claims from Oct 1, 2023 – Sept 30, 2024
         df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
@@ -158,7 +157,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (With Download Option)")
+st.title("📊 Insurance Claims Processor (With Debugging)")
 
 st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
 uploaded_existing_report = st.file_uploader("Upload Existing Report (Excel):", type=["xlsx"])
@@ -171,33 +170,13 @@ if st.button("🚀 Process Files"):
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        existing_data = {}
-        if uploaded_existing_report:
-            existing_data = load_existing_report(uploaded_existing_report)
-
         sorted_files = sort_uploaded_files(uploaded_files)
+        final_results, skipped_files = process_cumulative_quarters({}, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
-        final_results, skipped_files = process_cumulative_quarters(existing_data, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
+        st.success("✅ Processing complete!")
 
-        # Save results to an Excel file
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
-        output_buffer = BytesIO()
-
-        with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
-            for quarter, df in final_results.items():
-                if not df.empty:
-                    df.to_excel(writer, sheet_name=quarter, index=False)
-
-        output_buffer.seek(0)
-
-        st.success("✅ Processing complete! Download your report below.")
-        st.download_button(
-            label="📥 Download Processed Report",
-            data=output_buffer,
-            file_name=output_file,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    else:
+        st.error("❌ Please upload valid Excel files to process.")
 
     else:
         st.error("❌ Please upload valid Excel files to process.")
