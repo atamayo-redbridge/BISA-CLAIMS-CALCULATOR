@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import os
 from datetime import datetime
+from io import BytesIO
 
 # ---------------------- Helper Functions ----------------------
 
@@ -109,7 +111,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
         else:
             diagnostic_series = pd.Series(False, index=df.index)
 
-        # Apply logic based on claim date (NOT by quarter number)
+        # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
         # Apply Year 1 logic for all claims from Oct 1, 2023 – Sept 30, 2024
@@ -146,7 +148,7 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (COVID & Date Fixes)")
+st.title("📊 Insurance Claims Processor (With Download Option)")
 
 st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
 uploaded_existing_report = st.file_uploader("Upload Existing Report (Excel):", type=["xlsx"])
@@ -167,7 +169,25 @@ if st.button("🚀 Process Files"):
 
         final_results, skipped_files = process_cumulative_quarters(existing_data, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
+        # Save results to an Excel file
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        output_file = f"Processed_Claims_Report_{timestamp}.xlsx"
+        output_buffer = BytesIO()
+
+        with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
+            for quarter, df in final_results.items():
+                if not df.empty:
+                    df.to_excel(writer, sheet_name=quarter, index=False)
+
+        output_buffer.seek(0)
+
         st.success("✅ Processing complete! Download your report below.")
+        st.download_button(
+            label="📥 Download Processed Report",
+            data=output_buffer,
+            file_name=output_file,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
     else:
         st.error("❌ Please upload valid Excel files to process.")
