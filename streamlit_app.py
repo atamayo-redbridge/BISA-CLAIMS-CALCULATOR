@@ -2,9 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
-import os
 from datetime import datetime
-from io import BytesIO
 
 # ---------------------- Helper Functions ----------------------
 
@@ -30,18 +28,14 @@ def extract_month_year(filename):
 
 # Load previous report if uploaded
 def load_existing_report(uploaded_report):
-    try:
-        existing_data = {}
-        xls = pd.ExcelFile(uploaded_report)
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(xls, sheet_name=sheet_name)
-            existing_data[sheet_name] = df
-        return existing_data
-    except Exception as e:
-        st.error(f"Error loading existing report: {e}")
-        return {}
+    existing_data = {}
+    xls = pd.ExcelFile(uploaded_report)
+    for sheet_name in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet_name)
+        existing_data[sheet_name] = df
+    return existing_data
 
-# Sort files by year and month (returns tuple of (year, month, file))
+# Sort files by year and month
 def sort_uploaded_files(uploaded_files):
     files_with_dates = []
     for file in uploaded_files:
@@ -51,32 +45,21 @@ def sort_uploaded_files(uploaded_files):
             files_with_dates.append((year, month_number, file))
     return sorted(files_with_dates, key=lambda x: (x[0], x[1]))
 
-# Dynamically detect the MONTO column
-def detect_monto_column(df):
+# Dynamically detect required columns
+def detect_column(df, possible_names):
     for col in df.columns:
-        if "MONTO" in col.upper():
+        if any(name in col.upper() for name in possible_names):
             return col
     return None
 
-# Dynamically detect the NOMBRE_ASEGURADO column
-def detect_nombre_column(df):
-    for col in df.columns:
-        if "NOMBREASEGURADO" in col.upper() or "NOMBRESASEGURADO" in col.upper() or "NOMBRE_ASEGURADO" in col.upper():
-            return col
-    return None
+# ---------------------- Processing Claims ----------------------
 
-# Process claims and apply caps, preserving all required columns
 def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_cap_year1, trigger_cap_year2, total_cap_year2, status_text, progress_bar):
     cumulative_data = pd.DataFrame()
     quarterly_results = {}
     skipped_files = []
-    cumulative_final_sum = 0  
 
-    # Define date ranges for filtering
-    year1_start, year1_end = pd.Timestamp("2023-10-01"), pd.Timestamp("2024-09-30")
-    year2_start, year2_end = pd.Timestamp("2024-10-01"), pd.Timestamp("2025-09-30")
-
-    if existing_data and len(existing_data) > 0:
+    if existing_data:
         cumulative_data = pd.concat(existing_data.values(), ignore_index=True)
 
     total_files = len(sorted_files)
@@ -84,10 +67,9 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
     month_counter = 0
 
     for i, (year, month_number, file) in enumerate(sorted_files):
-        # Every three files, assign a new quarter
         if month_counter % 3 == 0:
             quarter_key = f"Q{quarter_number}"
-            quarterly_results[quarter_key] = None  # Placeholder
+            quarterly_results[quarter_key] = []
             quarter_number += 1
 
         df = pd.read_excel(file)
@@ -99,115 +81,93 @@ def process_cumulative_quarters(existing_data, sorted_files, covid_cap, total_ca
             skipped_files.append(file.name)
             continue
 
-        # Detect MONTO and NOMBRE_ASEGURADO columns
-        monto_col = detect_monto_column(df)
-        nombre_col = detect_nombre_column(df)
+        # Detect necessary columns
+        monto_col = detect_column(df, ["MONTO"])
+        name_col = detect_column(df, ["NOMBREASEGURADO", "NOMBRE_ASEGURADO", "NOMBRESASEGURADO"])
+        diagnostic_col = detect_column(df, ["DIAGNOSTICO", "DIAGNOSTICOS"])
+
         if not monto_col:
             skipped_files.append(file.name)
             continue
 
-        # Rename name column if found; otherwise, assign default value
-        if nombre_col:
-            df.rename(columns={nombre_col: "NOMBRE_ASEGURADO"}, inplace=True)
-        else:
+        if not name_col:
             df["NOMBRE_ASEGURADO"] = "No Name Provided"
+        else:
+            df.rename(columns={name_col: "NOMBRE_ASEGURADO"}, inplace=True)
 
+        # Convert claim date to datetime
         df["FECHA_RECLAMO"] = pd.to_datetime(df["FECHA_RECLAMO"], errors="coerce")
 
-        # Filter claims: Only include those with FECHA_RECLAMO between 2023-10-01 and 2025-09-30
-        df = df[(df["FECHA_RECLAMO"] >= year1_start) & (df["FECHA_RECLAMO"] <= year2_end)]
+        # Define Year 1 and Year 2 date ranges
+        year1_start = pd.Timestamp("2023-10-01")
+        year1_end = pd.Timestamp("2024-09-30")
+        year2_start = pd.Timestamp("2024-10-01")
 
-        # Determine Year Type based on FECHA_RECLAMO
+        # Identify COVID-related claims
+        if diagnostic_col:
+            diagnostic_series = df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False)
+        else:
+            diagnostic_series = pd.Series(False, index=df.index)
+
+        # Apply logic based on claim date (NOT by quarter number)
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
-        # Set TOTAL_AMOUNT from the detected MONTO column
+        # Apply Year 1 logic for all claims from Oct 1, 2023 – Sept 30, 2024
+        df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_series, df[monto_col], 0)
+        df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
+
+        # Apply Year 2 logic for claims from Oct 1, 2024, onwards
+        df.loc[df["YEAR_TYPE"] == "Year2", "COVID_AMOUNT"] = 0
+        df.loc[df["YEAR_TYPE"] == "Year2", "GENERAL_AMOUNT"] = df[monto_col]
+
+        # Set TOTAL_AMOUNT
         df["TOTAL_AMOUNT"] = df[monto_col]
 
-        # Apply caps and calculate FINAL based on claim year:
-        # Year 1: FINAL = TOTAL_AMOUNT / 2, capped at ±total_cap_year1
-        # Year 2: FINAL = TOTAL_AMOUNT, capped at ±total_cap_year2
+        # Apply caps
         df["FINAL"] = np.where(
             df["YEAR_TYPE"] == "Year1",
             df["TOTAL_AMOUNT"].div(2).apply(lambda x: cap_value(x, total_cap_year1)),
             df["TOTAL_AMOUNT"].apply(lambda x: cap_value(x, total_cap_year2))
         )
 
-        # Group by COD_ASEGURADO and NOMBRE_ASEGURADO and sum the values
-        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"], as_index=False).agg({
+        # Aggregate data
+        grouped = df.groupby(["COD_ASEGURADO", "NOMBRE_ASEGURADO"]).agg({
+            "COVID_AMOUNT": "sum",
+            "GENERAL_AMOUNT": "sum",
             "TOTAL_AMOUNT": "sum",
             "FINAL": "sum"
-        })
-
-        # Ensure all required columns are present
-        required_out_cols = ["COD_ASEGURADO", "NOMBRE_ASEGURADO", "TOTAL_AMOUNT", "FINAL"]
-        for col in required_out_cols:
-            if col not in grouped.columns:
-                grouped[col] = np.nan
+        }).reset_index()
 
         quarterly_results[quarter_key] = grouped.copy()
         month_counter += 1
         progress_bar.progress((i + 1) / total_files)
 
-    progress_bar.progress(1.0)  # Ensure progress bar reaches 100%
     return quarterly_results, skipped_files
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor")
+st.title("📊 Insurance Claims Processor (COVID & Date Fixes)")
 
-# 📥 Upload Existing Report (Optional)
-st.header("📥 Upload Existing Cumulative Report (Optional)")
-uploaded_existing_report = st.file_uploader("Upload an existing cumulative report (Excel):", type=["xlsx"])
+st.header("1️⃣ Upload Existing Cumulative Report (Optional)")
+uploaded_existing_report = st.file_uploader("Upload Existing Report (Excel):", type=["xlsx"])
 
-# 📂 Upload New Monthly Files
-st.header("📂 Upload New Monthly Claim Files")
-uploaded_files = st.file_uploader("Upload new claim files (Excel):", type=["xlsx"], accept_multiple_files=True)
+st.header("2️⃣ Upload New Monthly Claim Files")
+uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("🚀 Process Files"):
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    if not uploaded_files:
-        st.error("❌ Please upload at least one file!")
-    else:
-        sorted_files = sort_uploaded_files(uploaded_files)
+    if uploaded_files:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
 
         existing_data = {}
         if uploaded_existing_report:
             existing_data = load_existing_report(uploaded_existing_report)
-            st.success("✅ Existing cumulative report loaded successfully.")
 
-        final_results, skipped_files = process_cumulative_quarters(
-            existing_data, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar
-        )
+        sorted_files = sort_uploaded_files(uploaded_files)
 
-        # Save results to Excel
-        output_filename = f"Processed_Claims_Report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
-        output_path = os.path.join("outputs", output_filename)
-        if not os.path.exists("outputs"):
-            os.makedirs("outputs")
-        with pd.ExcelWriter(output_path) as writer:
-            overall_final_sum = 0
-            for quarter, df in final_results.items():
-                if df is not None and not df.empty:
-                    quarter_final_sum = df["FINAL"].sum()
-                    overall_final_sum += quarter_final_sum
-                    df.to_excel(writer, sheet_name=quarter, index=False)
-                    st.info(f"🧾 {quarter} Final Sum: {quarter_final_sum:,.2f}")
-            st.success(f"🔢 Overall FINAL Sum Across All Quarters: {overall_final_sum:,.2f}")
+        final_results, skipped_files = process_cumulative_quarters(existing_data, sorted_files, 2000, 20000, 40000, 2000000, status_text, progress_bar)
 
-        with open(output_path, "rb") as f:
-            excel_data = f.read()
+        st.success("✅ Processing complete! Download your report below.")
 
-        st.success("✅ Processing complete! Download your updated report below.")
-        st.download_button(
-            label="📥 Download Processed Report",
-            data=excel_data,
-            file_name=output_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-        if skipped_files:
-            st.warning("⚠️ Some files were skipped due to missing columns:")
-            for file in skipped_files:
-                st.write(f"- {file}")
+    else:
+        st.error("❌ Please upload valid Excel files to process.")
