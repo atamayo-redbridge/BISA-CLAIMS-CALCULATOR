@@ -94,11 +94,17 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
         year1_end = pd.Timestamp("2024-09-30")
         year2_start = pd.Timestamp("2024-10-01")
 
+        # Ensure the diagnostic column exists
+        if diagnostic_col:
+            covid_condition = df[diagnostic_col].astype(str).str.contains("COVID", case=False, na=False)
+        else:
+            covid_condition = False  # Default to False if no diagnostic column
+
         # Apply logic based on claim date
         df["YEAR_TYPE"] = np.where(df["FECHA_RECLAMO"] < year2_start, "Year1", "Year2")
 
         # Apply Year 1 logic
-        df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & diagnostic_col, df[monto_col], 0)
+        df["COVID_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & covid_condition, df[monto_col], 0)
         df["GENERAL_AMOUNT"] = np.where((df["YEAR_TYPE"] == "Year1") & (df["COVID_AMOUNT"] == 0), df[monto_col], 0)
 
         # Apply Year 2 logic
@@ -133,7 +139,7 @@ def process_cumulative_quarters(sorted_files, covid_cap, total_cap_year1, trigge
 
 # ---------------------- Streamlit UI ----------------------
 
-st.title("📊 Insurance Claims Processor (Fixed Retention)")
+st.title("📊 Insurance Claims Processor (Fixed Retention & COVID Logic)")
 
 st.header("1️⃣ Upload New Monthly Claim Files")
 uploaded_files = st.file_uploader("Upload Monthly Claim Files:", type=["xlsx"], accept_multiple_files=True)
